@@ -1,0 +1,20 @@
+{
+    "python.pythonPath": "/Users/lisen/miniconda3/envs/python36/bin/python",
+    "python.linting.flake8Enabled": true,
+    "python.formatting.provider": "yapf",
+    "workbench.editor.showTabs": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=120",
+        "--ignore=E501,W503,E266,E265"
+    ],
+    "python.jediEnabled": true,
+    "python.autoComplete.extraPaths": [
+        "/Users/lisen/miniconda3/envs/python36/lib/python3.6/site-packages",
+    ],
+    "editor.rulers": [
+        120
+    ],
+    "python.languageServer": "Jedi",
+    // "editor.formatOnType": true,
+    // "editor.formatOnSave": true
+}
