@@ -2,11 +2,6 @@
 
 本项目是基于华为的TinyBert进行修改的，目前只是修改了数据的读取方式和少量的超参数，后续会针对相关代码做进一步优化。
 
-Release Notes
-=============
-First version: 2020/07/08
-
-
 
 General Distillation （通用版预训练语言模型）
 ====================
@@ -16,6 +11,9 @@ General Distillation （通用版预训练语言模型）
 sh train.sh
                              
 ```
+- 数据格式  
+目前数据为普通文本格式txt，每行一句话。（后续会加入2句分类任务，数据可能需要两句话，及相应的label）
+
 官方提供的几个预训练好的版本：
 
 =================1st version to reproduce our results in the paper ===========================
