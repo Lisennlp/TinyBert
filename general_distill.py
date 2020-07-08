@@ -51,7 +51,8 @@ def convert_example_to_features(text, tokenizer, max_seq_len):
         1): 单句
         2): 双句，以\t分隔，并且分隔后这两个句子的0,1索引位置
     """
-    sents = text.split('\t')[:2]
+    # 本项目为了方便，以单句的语料为例
+    sents = text.split('\t')[:1]
     tokens = ['[CLS]'] + tokenizer.tokenize(sents[0])[:max_seq_len - 2] + ['[SEP]']
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
     segment_ids = len(input_ids) * [0]
@@ -150,7 +151,7 @@ def main():
                         help="The initial learning rate for Adam.")
     parser.add_argument('--weight_decay',
                         '--wd',
-                        default=1e-4,
+                        default=1e-1,
                         type=float,
                         metavar='W',
                         help='weight decay')
@@ -233,10 +234,10 @@ def main():
     total_train_examples = len(dataset)
 
     num_train_optimization_steps = int(total_train_examples / args.train_batch_size /
-                                       args.gradient_accumulation_steps)
+                                       args.gradient_accumulation_steps * args.num_train_epochs)
     if args.local_rank != -1:
         num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size(
-        )
+        ) * args.num_train_epochs
 
     if args.continue_train:
         student_model = TinyBertForPreTraining.from_pretrained(args.student_model)
