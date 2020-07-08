@@ -22,16 +22,13 @@ import logging
 import os
 import random
 import sys
-import json
 
 import numpy as np
 import torch
 from collections import namedtuple
-from tempfile import TemporaryDirectory
-from pathlib import Path
 from torch.utils.data import (DataLoader, RandomSampler, Dataset)
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from torch.nn import MSELoss
 
 from transformer.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -41,13 +38,6 @@ from transformer.optimization import BertAdam
 
 csv.field_size_limit(sys.maxsize)
 
-# This is used for running on Huawei Cloud.
-oncloud = True
-try:
-    import moxing as mox
-except:
-    oncloud = False
-
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
@@ -56,17 +46,28 @@ logger = logging.getLogger(__name__)
 InputFeatures = namedtuple("InputFeatures", "input_ids input_masks segment_ids")
 
 
-def convert_example_to_features(text, tokenizer, max_seq_length):
-    tokens = ['[CLS]'] + tokenizer.tokenize(text)[:max_seq_length - 2] + ['[SEP]']
+def convert_example_to_features(text, tokenizer, max_seq_len):
+    """输入text格式：
+        1): 单句
+        2): 双句，以\t分隔，并且分隔后这两个句子的0,1索引位置
+    """
+    sents = text.split('\t')[:2]
+    tokens = ['[CLS]'] + tokenizer.tokenize(sents[0])[:max_seq_len - 2] + ['[SEP]']
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
     segment_ids = len(input_ids) * [0]
-    input_array = np.zeros(max_seq_length, dtype=np.int)
+
+    if len(sents) > 1:
+        token_b = tokenizer.tokenize(sents[1])[:max_seq_len - 2] + ['[SEP]']
+        input_ids += tokenizer.convert_tokens_to_ids(token_b)
+        segment_ids += len(token_b) * [1]
+
+    input_array = np.zeros(max_seq_len, dtype=np.int)
     input_array[:len(input_ids)] = input_ids
 
-    mask_array = np.zeros(max_seq_length, dtype=np.bool)
+    mask_array = np.zeros(max_seq_len, dtype=np.bool)
     mask_array[:len(input_ids)] = 1
 
-    segment_array = np.zeros(max_seq_length, dtype=np.bool)
+    segment_array = np.zeros(max_seq_len, dtype=np.bool)
     segment_array[:len(segment_ids)] = segment_ids
 
     feature = InputFeatures(input_ids=input_array,
@@ -95,13 +96,25 @@ class PregeneratedDataset(Dataset):
                 self.segment_ids.append(feature.segment_ids)
                 self.input_masks.append(feature.input_masks)
 
+        self.data_size = len(self.input_ids)
+
     def __len__(self):
-        return len(self.input_ids)
+        return self.data_size
 
     def __getitem__(self, item):
         return (torch.tensor(self.input_ids[item].astype(np.int64)),
                 torch.tensor(self.input_masks[item].astype(np.int64)),
                 torch.tensor(self.segment_ids[item].astype(np.int64)))
+
+
+def save_model(prefix, model, path):
+    logging.info("** ** * Saving  model ** ** * ")
+    model_name = "{}_{}".format(prefix, WEIGHTS_NAME)
+    model_to_save = model.module if hasattr(model, 'module') else model
+    output_model_file = os.path.join(path, model_name)
+    output_config_file = os.path.join(path, CONFIG_NAME)
+    torch.save(model_to_save.state_dict(), output_model_file)
+    model_to_save.config.to_json_file(output_config_file)
 
 
 def main():
@@ -114,18 +127,12 @@ def main():
     parser.add_argument("--output_dir", default=None, type=str, required=True)
 
     # Other parameters
-    parser.add_argument(
-        "--max_seq_length",
-        default=128,
-        type=int,
-        help="The maximum total input sequence length after WordPiece tokenization. \n"
-        "Sequences longer than this will be truncated, and sequences shorter \n"
-        "than this will be padded.")
-
-    parser.add_argument(
-        "--reduce_memory",
-        action="store_true",
-        help="Store training data as on-disc memmaps to massively reduce memory usage")
+    parser.add_argument("--max_seq_len",
+                        default=128,
+                        type=int,
+                        help="The maximum total input sequence length after WordPiece \n"
+                        " tokenization. Sequences longer than this will be truncated, \n"
+                        "and sequences shorter than this will be padded.")
     parser.add_argument("--do_eval",
                         action='store_true',
                         help="Whether to run eval on the dev set.")
@@ -164,11 +171,11 @@ def main():
                         default=-1,
                         help="local_rank for distributed training on gpus")
     parser.add_argument('--seed', type=int, default=42, help="random seed for initialization")
-    parser.add_argument(
-        '--gradient_accumulation_steps',
-        type=int,
-        default=1,
-        help="Number of updates steps to accumulate before performing a backward/update pass.")
+    parser.add_argument('--gradient_accumulation_steps',
+                        type=int,
+                        default=1,
+                        help="Number of updates steps to accumulate before performing \n"
+                        "a backward/update pass.")
     parser.add_argument('--fp16',
                         action='store_true',
                         help="Whether to use 16-bit float precision instead of 32-bit")
@@ -222,10 +229,8 @@ def main():
 
     tokenizer = BertTokenizer.from_pretrained(args.teacher_model, do_lower_case=args.do_lower_case)
 
-    epoch_dataset = PregeneratedDataset(args.train_file_path,
-                                        tokenizer,
-                                        max_seq_len=args.max_seq_length)
-    total_train_examples = len(epoch_dataset)
+    dataset = PregeneratedDataset(args.train_file_path, tokenizer, max_seq_len=args.max_seq_len)
+    total_train_examples = len(dataset)
 
     num_train_optimization_steps = int(total_train_examples / args.train_batch_size /
                                        args.gradient_accumulation_steps)
@@ -250,7 +255,6 @@ def main():
             raise ImportError(
                 "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training."
             )
-
         teacher_model = DDP(teacher_model)
     elif n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
@@ -281,7 +285,6 @@ def main():
                          warmup=args.warmup_proportion,
                          t_total=num_train_optimization_steps)
 
-    global_step = 0
     logging.info("***** Running training *****")
     logging.info("  Num examples = {}".format(total_train_examples))
     logging.info("  Batch size = %d", args.train_batch_size)
@@ -289,16 +292,17 @@ def main():
 
     if 1:
         if args.local_rank == -1:
-            train_sampler = RandomSampler(epoch_dataset)
+            train_sampler = RandomSampler(dataset)
         else:
-            train_sampler = DistributedSampler(epoch_dataset)
-        train_dataloader = DataLoader(epoch_dataset,
+            train_sampler = DistributedSampler(dataset)
+        train_dataloader = DataLoader(dataset,
                                       sampler=train_sampler,
                                       batch_size=args.train_batch_size)
         tr_loss = 0.
         tr_att_loss = 0.
         tr_rep_loss = 0.
         student_model.train()
+        global_step = 0
         nb_tr_examples, nb_tr_steps = 0, 0
         for epoch in range(int(args.num_train_epochs)):
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration", ascii=True)):
@@ -312,8 +316,8 @@ def main():
 
                 student_atts, student_reps = student_model(input_ids, segment_ids, input_mask)
                 teacher_reps, teacher_atts, _ = teacher_model(input_ids, segment_ids, input_mask)
-                teacher_reps = [teacher_rep.detach() for teacher_rep in teacher_reps
-                               ]    # speedup 1.5x
+                # speedup 1.5x
+                teacher_reps = [teacher_rep.detach() for teacher_rep in teacher_reps]
                 teacher_atts = [teacher_att.detach() for teacher_att in teacher_atts]
 
                 teacher_layer_num = len(teacher_atts)
@@ -346,7 +350,6 @@ def main():
                     loss = loss.mean()    # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
-
                 if args.fp16:
                     optimizer.backward(loss)
                 else:
@@ -362,18 +365,15 @@ def main():
                 mean_loss = tr_loss * args.gradient_accumulation_steps / nb_tr_steps
                 mean_att_loss = tr_att_loss * args.gradient_accumulation_steps / nb_tr_steps
                 mean_rep_loss = tr_rep_loss * args.gradient_accumulation_steps / nb_tr_steps
-                if step % 10 == 0:
-                    print(f'mean_loss = {mean_loss}')
+                if step % 100 == 0:
+                    logger.info(f'mean_loss = {mean_loss}')
 
                 if (step + 1) % args.gradient_accumulation_steps == 0:
-
                     optimizer.step()
                     optimizer.zero_grad()
                     global_step += 1
 
                     if (global_step + 1) % args.eval_step == 0:
-                        print(f'global_step = {global_step}')
-
                         result = {}
                         result['global_step'] = global_step
                         result['loss'] = mean_loss
@@ -387,30 +387,11 @@ def main():
                                 writer.write("%s = %s\n" % (key, str(result[key])))
 
                         # Save a trained model
-                        model_name = "step_{}_{}".format(global_step, WEIGHTS_NAME)
-                        logging.info("** ** * Saving fine-tuned model ** ** * ")
-                        # Only save the model it-self
-                        model_to_save = student_model.module if hasattr(student_model,
-                                                                        'module') else student_model
+                        prefix = f"step_{step}"
+                        save_model(prefix, student_model, args.output_dir)
 
-                        output_model_file = os.path.join(args.output_dir, model_name)
-                        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-
-                        torch.save(model_to_save.state_dict(), output_model_file)
-                        model_to_save.config.to_json_file(output_config_file)
-                        tokenizer.save_vocabulary(args.output_dir)
-
-            model_name = "epoch_{}_{}".format(epoch, WEIGHTS_NAME)
-            logging.info("** ** * Saving fine-tuned model ** ** * ")
-            model_to_save = student_model.module if hasattr(student_model,
-                                                            'module') else student_model
-
-            output_model_file = os.path.join(args.output_dir, model_name)
-            output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-
-            torch.save(model_to_save.state_dict(), output_model_file)
-            model_to_save.config.to_json_file(output_config_file)
-            tokenizer.save_vocabulary(args.output_dir)
+            prefix = f"epoch_{epoch}"
+            save_model(prefix, student_model, args.output_dir)
 
 
 if __name__ == "__main__":
