@@ -1,7 +1,7 @@
 
 # 第一阶段
 if [ "$1" = "one" ];then
-        echo 'Run evaluation...'
+        echo 'Run one stage train...'
         CUDA_VISIBLE_DEVICES=2,3 python task_distill.py   \
                           --teacher_model /nas/pretrain-bert/pretrain-pytorch/chinese_wwm_ext_pytorch/ \
                           --student_model /home/lishengping/caiyun_projects/TinyBERT/student_model/output_dir  \
@@ -20,7 +20,7 @@ if [ "$1" = "one" ];then
 
 # 第二阶段
 elif [ "$1" = "two" ];then
-        echo 'Run evaluation...'
+        echo 'Run two stage train...'
 
         CUDA_VISIBLE_DEVICES=2,3 python task_distill.py   \
                           --teacher_model /nas/pretrain-bert/pretrain-pytorch/chinese_wwm_ext_pytorch/ \
