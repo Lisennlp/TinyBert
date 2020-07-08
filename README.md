@@ -54,6 +54,10 @@ sh script/task_train.sh two
 **数据扩充的过程如下: **
 对于特定任务的数据中每一条文本，首先使用bert自带的方式进行bpe分词，bpe分词之后是完整单词（single-piece word），用[MASK]符号代替，然后使用bert进行预测并选择其对应的候选词N个；如果bpe（就是BertTokenizer）分词之后不是完整单词，则使用Glove词向量以及余弦相似度来选择对应的N个候选词，最后以概率p选择是否替换这个单词，从而产生更多的文本数据。  
 
+- 数据
+
+    因为懒得找中文的词向量下载，暂时用英文的glove文件和英文原始数据。中文的话只需要把预训练模型改为中文bert，glove改为中文的词向量文件即可。原始数据样式和增强后的数据样式在data/en_data.txt和data/aug_en_data.txt
+
 
 ## Evaluation  
 
