@@ -27,13 +27,18 @@ Task Distillation （fine-tune版预训练语言模型蒸馏）
 sh script/task_train.sh one
 
 # 第二阶段
-sh script/task_train.sh one
+sh script/task_train.sh two
                              
 ```
 
 ## 数据格式  
 
     data/*.txt
+
+
+## Evaluation  
+
+待续...
 
 
 ## 官方版本
@@ -57,7 +62,3 @@ We here also provide the distilled TinyBERT(both 4layer-312dim and 6layer-768dim
 
 [TinyBERT(6layer-768dim)](https://drive.google.com/uc?export=download&id=1Vf0ZnMhtZFUE0XoD3hTXc6QtHwKr_PwS)
 
-
-## Evaluation  
-
-待续...
