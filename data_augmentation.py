@@ -40,40 +40,9 @@ StopWordsList = [
 ]
 
 
-def strip_accents(text):
-    """
-    Strip accents from input String.
-    :param text: The input string.
-    :type text: String.
-    :returns: The processed String.
-    :rtype: String.
-    """
-    try:
-        text = unicode(text, 'utf-8')
-    except (TypeError, NameError):
-        # unicode is a default on python 3
-        pass
-    text = unicodedata.normalize('NFD', text)
-    text = text.encode('ascii', 'ignore')
-    text = text.decode("utf-8")
-    return str(text)
-
-
 # valid string only includes al
 def _is_valid(string):
     return True if not re.search('[^a-z]', string) else False
-
-
-def _read_tsv(input_file, quotechar=None):
-    """Reads a tab separated value file."""
-    with open(input_file, "r", encoding="utf-8") as f:
-        reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
-        lines = []
-        for line in reader:
-            if sys.version_info[0] == 2:
-                line = list(unicode(cell, 'utf-8') for cell in line)
-            lines.append(line)
-        return lines
 
 
 def prepare_embedding_retrieval(glove_file, vocab_size=100000):
@@ -85,8 +54,8 @@ def prepare_embedding_retrieval(glove_file, vocab_size=100000):
     with open(glove_file, 'r', encoding='utf-8') as fin:
         for line in fin:
             items = line.strip().split()
-            words.append(items[0])
-            embeddings[items[0]] = [float(x) for x in items[1:]]
+            words.append(items[0])    # 将词加入words
+            embeddings[items[0]] = [float(x) for x in items[1:]]    # 将词向量加入embeddings
 
             cnt += 1
             if cnt == vocab_size:
@@ -126,9 +95,11 @@ class DataAugmentor(object):
         word_idx = self.vocab[word]
         word_emb = self.emb_norm[word_idx]
 
+        # 点乘计算向量距离
         dist = np.dot(self.emb_norm, word_emb.T)
+        # 让本身的向量负无穷，这样待会排序就不会取到
         dist[word_idx] = -np.Inf
-
+        # 从大到小排序
         candidate_ids = np.argsort(-dist)[:self.M]
         return [self.ids_to_tokens[idx] for idx in candidate_ids][:self.M]
 
@@ -136,7 +107,7 @@ class DataAugmentor(object):
         tokenized_text = self.tokenizer.tokenize(sent)
         tokenized_text = ['[CLS]'] + tokenized_text
         tokenized_len = len(tokenized_text)
-
+        # 为什么要把本身句子拼接到后面？是因为bert预训练都是用的两句训练的吗？
         tokenized_text = word_pieces + ['[SEP]'] + tokenized_text[1:] + ['[SEP]']
 
         if len(tokenized_text) > 512:
@@ -151,10 +122,10 @@ class DataAugmentor(object):
         self.model.to(device)
 
         predictions = self.model(tokens_tensor, segments_tensor)
-
+        # 直接取概率前self.M的索引, predictions : bsz x len x vocab_size
         word_candidates = torch.argsort(predictions[0, mask_id], descending=True)[:self.M].tolist()
         word_candidates = self.tokenizer.convert_ids_to_tokens(word_candidates)
-
+        # 过滤掉带有##的token
         return list(filter(lambda x: x.find("##"), word_candidates))
 
     def _word_augment(self, sentence, mask_token_idx, mask_token):
@@ -163,6 +134,9 @@ class DataAugmentor(object):
         tokenized_len = len(word_pieces)
 
         token_idx = -1
+        # 0 is [CLS], so start from 1
+        # mask_token_idx指的是完整词的索引，而经过tokenizer之后，就变成了没有##的token的索引。因为wordpiece的token是类似
+        # 如 ['word', '##love', 'happy', '##ness']
         for i in range(1, tokenized_len):
             if "##" not in word_pieces[i]:
                 token_idx = token_idx + 1
@@ -175,6 +149,7 @@ class DataAugmentor(object):
             else:
                 word_piece_ids.append(i)
 
+        # 是完整单词的话，长度为1，进行mask
         if len(word_piece_ids) == 1:
             word_pieces[word_piece_ids[0]] = '[MASK]'
             candidate_words = self._masked_language_model(sentence, word_pieces, word_piece_ids[0])
@@ -216,56 +191,22 @@ class DataAugmentor(object):
 
 class AugmentProcessor(object):
 
-    def __init__(self, augmentor, glue_dir, task_name):
+    def __init__(self, augmentor, data_path):
         self.augmentor = augmentor
-        self.glue_dir = glue_dir
-        self.task_name = task_name
-        self.augment_ids = {
-            'MRPC': [3, 4],
-            'MNLI': [8, 9],
-            'CoLA': [3],
-            'SST-2': [0],
-            'STS-B': [7, 8],
-            'QQP': [3, 4],
-            'QNLI': [1, 2],
-            'RTE': [1, 2]
-        }
-
-        self.filter_flags = {
-            'MRPC': True,
-            'MNLI': True,
-            'CoLA': False,
-            'SST-2': True,
-            'STS-B': True,
-            'QQP': True,
-            'QNLI': True,
-            'RTE': True
-        }
-
-        assert self.task_name in self.augment_ids
+        self.data_path = data_path
 
     def read_augment_write(self):
-        task_dir = os.path.join(self.glue_dir, self.task_name)
-        train_samples = _read_tsv(os.path.join(task_dir, "train.tsv"))
-        output_filename = os.path.join(task_dir, "train_aug.tsv")
+        filename = f'aug_{os.path.split(self.data_path)[1]}'
+        aug_train_path = os.path.join(os.path.split(self.data_path)[0], filename)
 
-        augment_ids_ = self.augment_ids[self.task_name]
-        filter_flag = self.filter_flags[self.task_name]
-
-        with open(output_filename, 'w', newline='', encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter="\t")
-            for (i, line) in enumerate(train_samples):
-                if i == 0 and filter_flag:
-                    writer.writerow(line)
+        with open(aug_train_path, 'w', newline='') as fw, open(self.data_path, 'r') as fr:
+            for (i, line) in enumerate(fr):
+                sent = line.strip('\n').strip()
+                if not line:
                     continue
-
-                for augment_id in augment_ids_:
-                    sent = line[augment_id]
-                    augmented_sents = self.augmentor.augment(sent)
-                    for augment_sent in augmented_sents:
-                        line[augment_id] = augment_sent
-                        writer.writerow(line)
-
+                augmented_sents = self.augmentor.augment(sent)
+                for augment_sent in augmented_sents:
+                    fw.write(f'{augment_sent}\n')
                 if (i + 1) % 1000 == 0:
                     logger.info("Having been processing {} examples".format(str(i + 1)))
 
@@ -283,12 +224,7 @@ def main():
                         type=str,
                         required=True,
                         help="Glove word embeddings file")
-    parser.add_argument("--glue_dir", default=None, type=str, required=True, help="GLUE data dir")
-    parser.add_argument("--task_name",
-                        default=None,
-                        type=str,
-                        required=True,
-                        help="Task(eg. CoLA, SST-2) that we want to do data augmentation")
+    parser.add_argument("--data_path", default=None, type=str, required=True, help="GLUE data dir")
     parser.add_argument("--N", default=30, type=int, help="How many times is the corpus expanded?")
     parser.add_argument("--M",
                         default=15,
@@ -302,48 +238,16 @@ def main():
     args = parser.parse_args()
     # logger.info(args)
 
-    default_params = {
-        "CoLA": {
-            "N": 30
-        },
-        "MNLI": {
-            "N": 10
-        },
-        "MRPC": {
-            "N": 30
-        },
-        "SST-2": {
-            "N": 20
-        },
-        "STS-b": {
-            "N": 30
-        },
-        "QQP": {
-            "N": 10
-        },
-        "QNLI": {
-            "N": 20
-        },
-        "RTE": {
-            "N": 30
-        }
-    }
-
-    if args.task_name in default_params:
-        args.N = default_params[args.task_name]["N"]
-
     # Prepare data augmentor
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_bert_model)
     model = BertForMaskedLM.from_pretrained(args.pretrained_bert_model)
     model.eval()
-
     emb_norm, vocab, ids_to_tokens = prepare_embedding_retrieval(args.glove_embs)
-
     data_augmentor = DataAugmentor(model, tokenizer, emb_norm, vocab, ids_to_tokens, args.M, args.N,
                                    args.p)
 
     # Do data augmentation
-    processor = AugmentProcessor(data_augmentor, args.glue_dir, args.task_name)
+    processor = AugmentProcessor(data_augmentor, args.data_path)
     processor.read_augment_write()
 
 

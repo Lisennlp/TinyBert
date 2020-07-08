@@ -536,7 +536,7 @@ class BertPooler(nn.Module):
 
         return pooled_output
 
-
+# 最后一层隐层状态输入 -> 768 x 768 -> gelu -> layernorm
 class BertPredictionHeadTransform(nn.Module):
     def __init__(self, config):
         super(BertPredictionHeadTransform, self).__init__()
@@ -554,7 +554,7 @@ class BertPredictionHeadTransform(nn.Module):
         hidden_states = self.LayerNorm(hidden_states)
         return hidden_states
 
-
+# 最后一层隐层状态输入 -> 768 x 768 -> gelu -> layernorm -> 这层输入(len x 768) -> 利用词向量参数vocab_size x 768 -> len x vocab_size + 可学习bias
 class BertLMPredictionHead(nn.Module):
     def __init__(self, config, bert_model_embedding_weights):
         super(BertLMPredictionHead, self).__init__()
@@ -1005,6 +1005,7 @@ class BertForMaskedLM(BertPreTrainedModel):
 
         if output_att:
             sequence_output, att_output = sequence_output
+        # sequence_output[-1]最后一层隐层状态输出 -> prediction_scores (len x vocab_size)
         prediction_scores = self.cls(sequence_output[-1])
 
         if masked_lm_labels is not None:
