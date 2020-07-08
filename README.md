@@ -42,13 +42,13 @@ sh script/task_train.sh two
 - 参数说明：
 
     python data_augmentation.py  \   
-            --pretrained_bert_model  /nas/pretrain-bert/pretrain-pytorch/bert-base-uncased  \   # bert预训练模型   
-            --data_path  data/en_data.txt    \  # 需要增强的数据路径   
-            --glove_embs  /nas/lishengping/datas/glove.6B.300d.txt   \   # glove词向量文件   
-            --M  15    \  # 从文本中选择M个词可能被替换   
-            --N  30    \  # 通过bert mask预测的概率前N个词去替换   
-            --p  0.4   \  # 某个词被替换的概率   
-            3>&2 2>&1 1>&3 | tee logs/data_augmentation.log
+                --pretrained_bert_model  /nas/pretrain-bert/pretrain-pytorch/bert-base-uncased  \   # bert预训练模型   
+                --data_path  data/en_data.txt    \  # 需要增强的数据路径   
+                --glove_embs  /nas/lishengping/datas/glove.6B.300d.txt   \   # glove词向量文件   
+                --M  15    \  # 从文本中选择M个词可能被替换   
+                --N  30    \  # 通过bert mask预测的概率前N个词去替换   
+                --p  0.4   \  # 某个词被替换的概率   
+                3>&2 2>&1 1>&3 | tee logs/data_augmentation.log
 
 论文在fine-tune阶段采用了数据增强的策略，从后面的实验中可以看出，数据增强起到了很重要的作用。   
 **数据扩充的过程如下: **
