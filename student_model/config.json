@@ -1,5 +1,4 @@
 {
-
   "attention_probs_dropout_prob": 0.1, 
   "directionality": "bidi", 
   "hidden_act": "gelu", 
