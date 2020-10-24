@@ -33,7 +33,7 @@ sh script/task_train.sh two
 
 ## 数据格式  
 
-    data/*.txt
+    data/train.txt,   data/eval.txt, 
 
 ## 数据增强
 
